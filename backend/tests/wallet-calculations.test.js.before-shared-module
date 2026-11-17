@@ -1,0 +1,119 @@
+const test = require('node:test')
+const assert = require('node:assert/strict')
+const Decimal = require('decimal.js')
+
+Decimal.set({
+  precision: 40,
+  rounding: Decimal.ROUND_HALF_UP,
+})
+
+function money(value) {
+  return new Decimal(value)
+    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+}
+
+function averagePrice(costBasis, quantity) {
+  if (
+    costBasis == null ||
+    !new Decimal(quantity).greaterThan(0)
+  ) {
+    return null
+  }
+
+  return new Decimal(costBasis)
+    .dividedBy(quantity)
+    .toDecimalPlaces(8, Decimal.ROUND_HALF_UP)
+    .toString()
+}
+
+function calculatePortfolio(quantity, latestPrice, costBasis) {
+  const qty = new Decimal(quantity)
+  const price = new Decimal(latestPrice)
+  const basis = new Decimal(costBasis)
+  const estimatedValue = money(qty.mul(price))
+  const profitLoss = estimatedValue.minus(basis)
+
+  return {
+    estimatedValue: estimatedValue.toFixed(2),
+    averagePurchasePrice: averagePrice(basis, qty),
+    unrealizedProfitLoss: money(profitLoss).toFixed(2),
+    unrealizedProfitLossPercentage: basis.greaterThan(0)
+      ? profitLoss
+          .dividedBy(basis)
+          .mul(100)
+          .toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+          .toFixed(2)
+      : null,
+  }
+}
+
+test('calculates estimated value and positive unrealized profit', () => {
+  const result = calculatePortfolio('2', '15', '20')
+
+  assert.deepEqual(result, {
+    estimatedValue: '30.00',
+    averagePurchasePrice: '10',
+    unrealizedProfitLoss: '10.00',
+    unrealizedProfitLossPercentage: '50.00',
+  })
+})
+
+test('calculates a loss when the market price falls', () => {
+  const result = calculatePortfolio('2', '8', '20')
+
+  assert.equal(result.estimatedValue, '16.00')
+  assert.equal(result.unrealizedProfitLoss, '-4.00')
+  assert.equal(result.unrealizedProfitLossPercentage, '-20.00')
+})
+
+test('calculates average purchase price', () => {
+  assert.equal(averagePrice('30', '2'), '15')
+})
+
+test('returns no average purchase price for zero quantity', () => {
+  assert.equal(averagePrice('0', '0'), null)
+})
+
+test('rounds money using half-up rounding', () => {
+  assert.equal(money('10.125').toFixed(2), '10.13')
+})
+
+test('partial sale reduces remaining cost basis proportionally', () => {
+  const originalQuantity = new Decimal('2')
+  const originalCostBasis = new Decimal('20')
+  const soldQuantity = new Decimal('1')
+
+  const costRemoved = originalCostBasis
+    .mul(soldQuantity)
+    .dividedBy(originalQuantity)
+    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+
+  const remainingQuantity = originalQuantity.minus(soldQuantity)
+  const remainingCostBasis = originalCostBasis.minus(costRemoved)
+
+  assert.equal(remainingQuantity.toString(), '1')
+  assert.equal(remainingCostBasis.toFixed(2), '10.00')
+
+  const result = calculatePortfolio(
+    remainingQuantity.toString(),
+    '15',
+    remainingCostBasis.toString(),
+  )
+
+  assert.equal(result.averagePurchasePrice, '10')
+  assert.equal(result.unrealizedProfitLoss, '5.00')
+  assert.equal(result.unrealizedProfitLossPercentage, '50.00')
+})
+
+test('full sale leaves zero quantity and zero cost basis', () => {
+  const quantity = new Decimal('2')
+  const costBasis = new Decimal('20')
+  const soldQuantity = new Decimal('2')
+
+  const costRemoved = soldQuantity.equals(quantity)
+    ? costBasis
+    : costBasis.mul(soldQuantity).dividedBy(quantity)
+
+  assert.equal(quantity.minus(soldQuantity).toString(), '0')
+  assert.equal(costBasis.minus(costRemoved).toFixed(2), '0.00')
+})

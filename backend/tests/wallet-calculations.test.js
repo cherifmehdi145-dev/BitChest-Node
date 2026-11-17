@@ -1,0 +1,127 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const Decimal = require("decimal.js");
+
+const {
+    money,
+    averagePrice,
+    calculateHoldingValues,
+    calculateCostRemoved,
+    calculateCostRemovedPrecisely
+} = require("../utils/walletCalculations");
+
+test("money rounds to two decimal places", () => {
+    assert.equal(money("12.345").toFixed(2), "12.35");
+});
+
+test("average purchase price is calculated correctly", () => {
+    assert.equal(averagePrice("100.00", "2"), "50");
+});
+
+test("average purchase price is null for zero quantity", () => {
+    assert.equal(averagePrice("100.00", "0"), null);
+});
+
+test("positive unrealized profit is calculated correctly", () => {
+    const result = calculateHoldingValues("2", "60", "100");
+
+    assert.equal(result.estimatedValue, "120.00");
+    assert.equal(result.unrealizedProfitLoss, "20.00");
+    assert.equal(result.unrealizedProfitLossPercentage, "20.00");
+});
+
+test("negative unrealized profit is calculated correctly", () => {
+    const result = calculateHoldingValues("2", "40", "100");
+
+    assert.equal(result.estimatedValue, "80.00");
+    assert.equal(result.unrealizedProfitLoss, "-20.00");
+    assert.equal(result.unrealizedProfitLossPercentage, "-20.00");
+});
+
+test("holding values handle a zero quantity", () => {
+    const result = calculateHoldingValues("0", "60", "0");
+
+    assert.equal(result.estimatedValue, "0.00");
+    assert.equal(result.averagePurchasePrice, null);
+    assert.equal(result.unrealizedProfitLoss, "0.00");
+    assert.equal(result.unrealizedProfitLossPercentage, null);
+});
+
+test("partial sale removes proportional cost basis", () => {
+    const removed = calculateCostRemoved("100.00", "1", "2");
+
+    assert.equal(removed.toFixed(2), "50.00");
+});
+
+test("full sale removes the entire remaining cost basis", () => {
+    const removed = calculateCostRemoved("100.00", "2", "2");
+
+    assert.equal(removed.toFixed(2), "100.00");
+});
+
+test("sale calculation rejects selling more than the current quantity", () => {
+    assert.throws(
+        () => calculateCostRemoved("100.00", "3", "2"),
+        /Invalid cost basis or sale quantity/
+    );
+});
+test("repeated partial sales never remove more cost basis than remains", () => {
+    let costBasis = new Decimal("0.05");
+    let quantity = new Decimal("3");
+
+    for (let i = 0; i < 2; i++) {
+        const soldQuantity = new Decimal("1");
+
+        const costRemoved = calculateCostRemoved(
+            costBasis,
+            soldQuantity,
+            quantity
+        );
+
+        assert.ok(costRemoved.lessThanOrEqualTo(costBasis));
+
+        costBasis = costBasis.minus(costRemoved);
+        quantity = quantity.minus(soldQuantity);
+    }
+
+    assert.equal(costBasis.toFixed(2), "0.01");
+    assert.equal(quantity.toString(), "1");
+});
+
+test("precise cost removal preserves fractional cents", () => {
+    const removed = calculateCostRemovedPrecisely("0.05", "1", "3");
+
+    assert.equal(
+        removed.toDecimalPlaces(8).toFixed(8),
+        "0.01666667"
+    );
+});
+test("repeated precise partial sales preserve the remaining cost basis", () => {
+    const Decimal = require("decimal.js");
+
+    let costBasis = new Decimal("0.05");
+    let quantity = new Decimal("3");
+
+    for (let i = 0; i < 2; i++) {
+        const soldQuantity = new Decimal("1");
+
+        const costRemoved = calculateCostRemovedPrecisely(
+            costBasis,
+            soldQuantity,
+            quantity
+        );
+
+        costBasis = costBasis.minus(costRemoved);
+        quantity = quantity.minus(soldQuantity);
+    }
+
+    assert.equal(quantity.toString(), "1");
+    assert.equal(costBasis.toDecimalPlaces(8).toFixed(8), "0.01666667");
+});
+
+test("profit and loss uses the unrounded market value", () => {
+    const result = calculateHoldingValues("3", "3.335", "10.01");
+
+    assert.equal(result.estimatedValue, "10.01");
+    assert.equal(result.unrealizedProfitLoss, "-0.01");
+});
