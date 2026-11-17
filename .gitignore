@@ -2,7 +2,7 @@
 node_modules/
 vendors/
 
-# Environment variables and secrets
+# Environment variables
 .env
 .env.*
 !.env.example
