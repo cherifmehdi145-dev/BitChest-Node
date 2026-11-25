@@ -205,32 +205,34 @@ router.post(
     requireRole("ROLE_ADMIN"),
     async (req, res) => {
         try {
-            const firstName =
-                typeof req.body.firstName === "string"
-                    ? req.body.firstName.trim()
-                    : "";
-
-            const lastName =
-                typeof req.body.lastName === "string"
-                    ? req.body.lastName.trim()
-                    : "";
-
             const email =
-                typeof req.body.email === "string"
-                    ? req.body.email.trim().toLowerCase()
-                    : "";
+    typeof req.body.email === "string"
+        ? req.body.email.trim().toLowerCase()
+        : "";
+            
 
-            if (!firstName || !lastName || !email) {
-                return res.status(400).json({
-                    message: "First name, last name, and email are required.",
-                });
-            }
 
-            if (firstName.length > 100 || lastName.length > 100) {
-                return res.status(400).json({
-                    message: "Names must not exceed 100 characters.",
-                });
-            }
+const firstName =
+    typeof req.body.firstName === "string"
+        ? req.body.firstName.trim()
+        : "";
+
+const lastName =
+    typeof req.body.lastName === "string"
+        ? req.body.lastName.trim()
+        : "";
+
+if (!firstName || !lastName) {
+    return res.status(400).json({
+        message: "First name and last name are required.",
+    });
+}
+
+if (firstName.length > 100 || lastName.length > 100) {
+    return res.status(400).json({
+        message: "Names cannot exceed 100 characters.",
+    });
+}
 
             if (!isValidEmail(email)) {
                 return res.status(400).json({
@@ -304,7 +306,9 @@ router.patch(
                 });
             }
 
-            const allowedFields = ["firstName", "lastName", "email"];
+ 
+
+            const allowedFields = ["firstName", "lastName"];
             const suppliedFields = Object.keys(req.body);
 
             if (
@@ -313,7 +317,7 @@ router.patch(
             ) {
                 return res.status(400).json({
                     message:
-                        "Provide at least one permitted field: firstName, lastName, or email.",
+                        "Provide at least one permitted field: firstName or lastName.",
                 });
             }
 
@@ -356,36 +360,7 @@ router.patch(
 
                 client.lastName = req.body.lastName.trim();
             }
-
-            if (Object.prototype.hasOwnProperty.call(req.body, "email")) {
-                if (typeof req.body.email !== "string") {
-                    return res.status(400).json({
-                        message: "Please provide a valid email address.",
-                    });
-                }
-
-                const email = req.body.email.trim().toLowerCase();
-
-                if (!isValidEmail(email)) {
-                    return res.status(400).json({
-                        message: "Please provide a valid email address.",
-                    });
-                }
-
-                const existingUser = await User.findOne({
-                    email,
-                    _id: { $ne: client._id },
-                }).select("_id");
-
-                if (existingUser) {
-                    return res.status(409).json({
-                        message: "An account with this email already exists.",
-                    });
-                }
-
-                client.email = email;
-            }
-
+         
             await client.save();
 
             return res.status(200).json({
@@ -502,6 +477,11 @@ router.patch(
     requirePasswordChanged,
     async (req, res) => {
         try {
+            if (Object.prototype.hasOwnProperty.call(req.body, "email")) {
+    return res.status(400).json({
+        message: "Email addresses cannot be changed.",
+    });
+}
             const firstName =
                 typeof req.body.firstName === "string"
                     ? req.body.firstName.trim()
@@ -512,16 +492,13 @@ router.patch(
                     ? req.body.lastName.trim()
                     : "";
 
-            const email =
-                typeof req.body.email === "string"
-                    ? req.body.email.trim().toLowerCase()
-                    : "";
+            
 
-            if (!firstName || !lastName || !email) {
-                return res.status(400).json({
-                    message: "First name, last name and email are required.",
-                });
-            }
+            if (!firstName || !lastName) {
+    return res.status(400).json({
+        message: "First name and last name are required.",
+    });
+}
 
             if (firstName.length > 100 || lastName.length > 100) {
                 return res.status(400).json({
@@ -529,24 +506,7 @@ router.patch(
                 });
             }
 
-            if (!isValidEmail(email)) {
-                return res.status(400).json({
-                    message: "Please provide a valid email address.",
-                });
-            }
-
-            const existingEmail = await User.findOne({
-                email,
-                _id: { $ne: req.user.id },
-            });
-
-            if (existingEmail) {
-                return res.status(409).json({
-                    message: "This email address is already in use.",
-                });
-            }
-
-            const user = await User.findOne({
+                const user = await User.findOne({
                 _id: req.user.id,
                 isActive: true,
             });
@@ -559,7 +519,7 @@ router.patch(
 
             user.firstName = firstName;
             user.lastName = lastName;
-            user.email = email;
+            
 
             await user.save();
 
@@ -574,11 +534,7 @@ router.patch(
                 },
             });
         } catch (error) {
-            if (error.code === 11000) {
-                return res.status(409).json({
-                    message: "This email address is already in use.",
-                });
-            }
+            
 
             console.error("Update own profile error:", error);
 

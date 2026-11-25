@@ -18,6 +18,10 @@ function App() {
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [signUpMode, setSignUpMode] = useState(false)
+  const [signUpFirstName, setSignUpFirstName] = useState('')
+  const [signUpLastName, setSignUpLastName] = useState('')
+  const [signUpConfirmPassword, setSignUpConfirmPassword] = useState('')
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -51,6 +55,8 @@ function App() {
   const [cryptoSaving, setCryptoSaving] = useState(false)
   const [cryptoError, setCryptoError] = useState('')
   const [cryptoMessage, setCryptoMessage] = useState('')
+  const [confirmationDialog, setConfirmationDialog] = useState(null)
+  const [confirmationLoading, setConfirmationLoading] = useState(false)
   const [selectedCryptoId, setSelectedCryptoId] = useState('')
   const [cryptoHistory, setCryptoHistory] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -76,12 +82,19 @@ const [profileLoading, setProfileLoading] = useState(false)
 const [profileSaving, setProfileSaving] = useState(false)
 const [profileError, setProfileError] = useState('')
 const [profileMessage, setProfileMessage] = useState('')
+const [profileCurrentPassword, setProfileCurrentPassword] = useState('')
+const [profileNewPassword, setProfileNewPassword] = useState('')
+const [profileConfirmPassword, setProfileConfirmPassword] = useState('')
+const [profilePasswordSaving, setProfilePasswordSaving] = useState(false)
+const [profilePasswordError, setProfilePasswordError] = useState('')
+const [profilePasswordMessage, setProfilePasswordMessage] = useState('')
 
   // Buy and sell form
   const [tradeCryptoId, setTradeCryptoId] = useState('')
   const [tradeType, setTradeType] = useState('BUY')
   const [tradeQuantity, setTradeQuantity] = useState('')
   const [tradeSaving, setTradeSaving] = useState(false)
+  const [tradeConfirmation, setTradeConfirmation] = useState(null)
   
   const isAdmin = user?.roles?.includes('ROLE_ADMIN')
   const mustChangePassword = user?.mustChangePassword === true
@@ -129,6 +142,72 @@ const [profileMessage, setProfileMessage] = useState('')
     }
   }
 
+async function handleProfilePasswordChange(event) {
+  event.preventDefault()
+
+  setProfilePasswordError('')
+  setProfilePasswordMessage('')
+
+  if (!profileCurrentPassword || !profileNewPassword || !profileConfirmPassword) {
+    setProfilePasswordError('Please complete all password fields.')
+    return
+  }
+
+  if (profileNewPassword !== profileConfirmPassword) {
+    setProfilePasswordError('The new passwords do not match.')
+    return
+  }
+
+  if (profileNewPassword.length < 8) {
+    setProfilePasswordError('The new password must contain at least 8 characters.')
+    return
+  }
+
+  setProfilePasswordSaving(true)
+
+  try {
+    const response = await fetch(`${API_URL}/users/change-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        currentPassword: profileCurrentPassword,
+        newPassword: profileNewPassword,
+      }),
+    })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(data.message || 'Unable to change the password.')
+    }
+
+    if (data.token) {
+      sessionStorage.setItem('bitchest_token', data.token)
+      setToken(data.token)
+    }
+
+    if (data.user) {
+      sessionStorage.setItem('bitchest_user', JSON.stringify(data.user))
+      setUser(data.user)
+    }
+
+    setProfileCurrentPassword('')
+    setProfileNewPassword('')
+    setProfileConfirmPassword('')
+    setProfilePasswordMessage('Password changed successfully.')
+  } catch (err) {
+    setProfilePasswordError(
+      err instanceof TypeError
+        ? 'Cannot connect to the BitChest server. Make sure the backend is running.'
+        : err.message
+    )
+  } finally {
+    setProfilePasswordSaving(false)
+  }
+}
   async function loadProfile() {
   setProfileLoading(true)
   setProfileError('')
@@ -298,13 +377,7 @@ const [profileMessage, setProfileMessage] = useState('')
   }
 }
 
-async function handleDeleteCrypto(crypto) {
-  const confirmed = window.confirm(
-    `Are you sure you want to delete ${crypto.name} (${crypto.symbol})? This action cannot be undone.`
-  )
-
-  if (!confirmed) return
-
+async function confirmDeleteCrypto(crypto) {
   setCryptoError('')
   setCryptoMessage('')
 
@@ -324,6 +397,15 @@ async function handleDeleteCrypto(crypto) {
       err.message || 'Unable to delete this cryptocurrency.'
     )
   }
+}
+
+function handleDeleteCrypto(crypto) {
+  setConfirmationDialog({
+    title: 'Delete cryptocurrency?',
+    message: `Are you sure you want to delete ${crypto.name} (${crypto.symbol})? This action cannot be undone.`,
+    confirmLabel: 'Yes, delete',
+    onConfirm: () => confirmDeleteCrypto(crypto),
+  })
 }
 
     async function handleQuoteSubmit(event) {
@@ -443,10 +525,9 @@ async function handleDeleteCrypto(crypto) {
     setClientSaving(true)
 
     const payload = {
-      firstName: clientFirstName.trim(),
-      lastName: clientLastName.trim(),
-      email: clientEmail.trim(),
-    }
+  firstName: clientFirstName.trim(),
+  lastName: clientLastName.trim(),
+}
 
     try {
       if (editingClient) {
@@ -463,15 +544,18 @@ async function handleDeleteCrypto(crypto) {
         await loadClients()
       } else {
         const data = await apiRequest('/users/clients', {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        })
+  method: 'POST',
+  body: JSON.stringify({
+    ...payload,
+    email: clientEmail.trim(),
+  }),
+})
 
         setTemporaryPassword(data.temporaryPassword || '')
         setTemporaryPasswordClient(
           [data.client?.firstName, data.client?.lastName]
             .filter(Boolean)
-            .join(' ') || payload.email
+            .join(' ') || clientEmail.trim()
         )
         setClientMessage(data.message || 'Client created successfully.')
         resetClientForm()
@@ -483,34 +567,40 @@ async function handleDeleteCrypto(crypto) {
       setClientSaving(false)
     }
   }
+   
+  async function confirmDeactivateClient(client) {
+  setClientError('')
+  setClientMessage('')
+  setTemporaryPassword('')
+  setTemporaryPasswordClient('')
 
-    async function handleDeactivateClient(client) {
-    const confirmed = window.confirm(
-      `Remove ${client.firstName} ${client.lastName} (${client.email}) from active clients? Their access will be revoked, but their wallet and transaction history will be preserved.`
+  try {
+    const data = await apiRequest(
+      `/users/clients/${encodeURIComponent(client.id)}`,
+      { method: 'DELETE' }
     )
 
-    if (!confirmed) return
+    setClientMessage(
+      data.message ||
+        'Client account successfully removed from active management. Financial records preserved.'
+    )
 
-    setClientError('')
-    setClientMessage('')
-    setTemporaryPassword('')
-    setTemporaryPasswordClient('')
-
-    try {
-      const data = await apiRequest(
-        `/users/clients/${encodeURIComponent(client.id)}`,
-        { method: 'DELETE' }
-      )
-
-      setClientMessage(
-        data.message || 'Client account successfully removed from active management. Financial records preserved.'
-      )
-      await loadClients()
-    } catch (err) {
-      setClientError(err.message || 'Unable to remove this client account.')
-    }
+    await loadClients()
+  } catch (err) {
+    setClientError(
+      err.message || 'Unable to remove this client account.'
+    )
   }
+}
 
+function handleDeactivateClient(client) {
+  setConfirmationDialog({
+    title: 'Remove client?',
+    message: `Are you sure you want to remove ${client.firstName} ${client.lastName} (${client.email}) from active clients? Their access will be revoked, but their wallet and transaction history will be preserved.`,
+    confirmLabel: 'Remove client',
+    onConfirm: () => confirmDeactivateClient(client),
+  })
+}
 
   async function handleProfileSubmit(event) {
   event.preventDefault()
@@ -525,7 +615,7 @@ async function handleDeleteCrypto(crypto) {
       body: JSON.stringify({
         firstName: profileFirstName,
         lastName: profileLastName,
-        email: profileEmail,
+        
       }),
     })
 
@@ -586,6 +676,68 @@ async function handleDeleteCrypto(crypto) {
       setLoading(false)
     }
   }
+
+  async function handleRegister(event) {
+  event.preventDefault()
+  setError('')
+  setMessage('')
+
+  if (
+    !signUpFirstName.trim() ||
+    !signUpLastName.trim() ||
+    !email.trim() ||
+    !password
+  ) {
+    setError('Please complete all fields.')
+    return
+  }
+
+  if (password.length < 8) {
+    setError('Password must contain at least 8 characters.')
+    return
+  }
+
+  if (password !== signUpConfirmPassword) {
+    setError('The passwords do not match.')
+    return
+  }
+
+  setLoading(true)
+
+  try {
+    const response = await fetch(`${API_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        firstName: signUpFirstName.trim(),
+        lastName: signUpLastName.trim(),
+        email: email.trim(),
+        password,
+      }),
+    })
+
+    const data = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+      throw new Error(data.message || 'Unable to create your account.')
+    }
+
+    setSignUpMode(false)
+    setSignUpFirstName('')
+    setSignUpLastName('')
+    setSignUpConfirmPassword('')
+    setPassword('')
+    setMessage(data.message || 'Account created successfully. You can now sign in.')
+  } catch (err) {
+    setError(
+      err instanceof TypeError
+        ? 'Cannot connect to the BitChest server. Make sure the backend is running.'
+        : err.message
+    )
+  } finally {
+    setLoading(false)
+  }
+}
 
   async function handlePasswordChange(event) {
     event.preventDefault()
@@ -718,32 +870,127 @@ async function handleDeleteCrypto(crypto) {
   }
 
   function renderLogin() {
-    return (
-      <main className="login-page">
-        <div className="login-layout">
-          {renderBrandPanel()}
+  return (
+    <main className="login-page">
+      <div className="login-layout">
+        {renderBrandPanel()}
 
-          <section className="form-panel">
-            <div className="form-content">
-              <p className="eyebrow">Welcome back</p>
-              <h1>Sign in</h1>
+        <section className="form-panel">
+          <div className="form-content">
+            <p className="eyebrow">
+              {signUpMode ? 'Join BitChest' : 'Welcome back'}
+            </p>
 
-              <p className="form-subtitle">
-                Enter your account details to access your BitChest space.
-              </p>
+            <h1>{signUpMode ? 'Create an account' : 'Sign in'}</h1>
 
-              {error && (
-                <div className="alert alert-error" role="alert">
-                  {error}
+            <p className="form-subtitle">
+              {signUpMode
+                ? 'Create your BitChest account and start exploring cryptocurrency.'
+                : 'Enter your account details to access your BitChest space.'}
+            </p>
+
+            {error && (
+              <div className="alert alert-error" role="alert">
+                {error}
+              </div>
+            )}
+
+            {message && (
+              <div className="alert alert-success" role="status">
+                {message}
+              </div>
+            )}
+
+            {signUpMode ? (
+              <form onSubmit={handleRegister}>
+                <div className="form-field">
+                  <label htmlFor="signUpFirstName">First name</label>
+                  <input
+                    id="signUpFirstName"
+                    name="firstName"
+                    type="text"
+                    autoComplete="given-name"
+                    placeholder="Your first name"
+                    maxLength={100}
+                    value={signUpFirstName}
+                    onChange={(event) => setSignUpFirstName(event.target.value)}
+                    required
+                  />
                 </div>
-              )}
 
-              {message && (
-                <div className="alert alert-success" role="status">
-                  {message}
+                <div className="form-field">
+                  <label htmlFor="signUpLastName">Last name</label>
+                  <input
+                    id="signUpLastName"
+                    name="lastName"
+                    type="text"
+                    autoComplete="family-name"
+                    placeholder="Your last name"
+                    maxLength={100}
+                    value={signUpLastName}
+                    onChange={(event) => setSignUpLastName(event.target.value)}
+                    required
+                  />
                 </div>
-              )}
 
+                <div className="form-field">
+                  <label htmlFor="signUpEmail">Email address</label>
+                  <input
+                    id="signUpEmail"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    placeholder="you@example.com"
+                    maxLength={254}
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-field">
+                  <label htmlFor="signUpPassword">Password</label>
+                  <input
+                    id="signUpPassword"
+                    name="password"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="At least 8 characters"
+                    minLength={8}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-field">
+                  <label htmlFor="signUpConfirmPassword">
+                    Confirm password
+                  </label>
+                  <input
+                    id="signUpConfirmPassword"
+                    name="confirmPassword"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="Enter your password again"
+                    minLength={8}
+                    value={signUpConfirmPassword}
+                    onChange={(event) =>
+                      setSignUpConfirmPassword(event.target.value)
+                    }
+                    required
+                  />
+                </div>
+
+                <button
+                  className="primary-button"
+                  type="submit"
+                  disabled={loading}
+                >
+                  {loading ? 'Creating account...' : 'Create my account'}
+                </button>
+              </form>
+            ) : (
               <form onSubmit={handleLogin}>
                 <div className="form-field">
                   <label htmlFor="email">Email address</label>
@@ -781,17 +1028,40 @@ async function handleDeleteCrypto(crypto) {
                   {loading ? 'Signing in...' : 'Sign in to BitChest'}
                 </button>
               </form>
+            )}
 
-              <p className="form-note">
-                Access is reserved for registered users. Keep your account
-                credentials private.
-              </p>
-            </div>
-          </section>
-        </div>
-      </main>
-    )
-  }
+            <p className="auth-switch">
+              {signUpMode
+                ? 'Already have an account?'
+                : "Don't have an account yet?"}{' '}
+              <button
+                type="button"
+                className="auth-switch-button"
+                onClick={() => {
+                  setSignUpMode(!signUpMode)
+                  setError('')
+                  setMessage('')
+                  setPassword('')
+                  setSignUpConfirmPassword('')
+                }}
+              >
+                {signUpMode ? 'Sign in' : 'Sign up'}
+              </button>
+            </p>
+
+            <p className="form-note">
+              {signUpMode
+                ? 'Your account will be created as a client account with an initial balance of €500.'
+                : 'Keep your account credentials private and secure.'}
+            </p>
+          </div>
+        </section>
+      </div>
+    </main>
+  )
+}       
+
+              
 
   function renderPasswordChange() {
     return (
@@ -1366,15 +1636,15 @@ details, and remove accounts from active management.
                 <div className="form-field client-form-email">
                   <label htmlFor="clientEmail">Email address</label>
                   <input
-                    id="clientEmail"
-                    type="email"
-                    maxLength={254}
-                    autoComplete="off"
-                    placeholder="client@example.com"
-                    value={clientEmail}
-                    onChange={(event) => setClientEmail(event.target.value)}
-                    required
-                  />
+  id="clientEmail"
+  type="email"
+  maxLength={254}
+  autoComplete="off"
+  placeholder="client@example.com"
+  value={clientEmail}
+onChange={(event) => setClientEmail(event.target.value)}
+readOnly={!!editingClient}
+/>
                 </div>
               </div>
 
@@ -1530,7 +1800,9 @@ details, and remove accounts from active management.
             </div>
           )}
         </section>
-
+         
+         
+         
         <footer className="admin-footer">
           <span>Copyright {new Date().getFullYear()} BitChest</span>
           <span>Client management - Administration workspace</span>
@@ -1610,17 +1882,30 @@ details, and remove accounts from active management.
                   />
                 </div>
 
-                <div className="form-field client-form-email">
-                  <label htmlFor="profileEmail">Email address</label>
-                  <input
-                    id="profileEmail"
-                    type="email"
-                    maxLength={254}
-                    value={profileEmail}
-                    onChange={(event) => setProfileEmail(event.target.value)}
-                    required
-                  />
-                </div>
+                <div className="form-field client-form-email profile-email-field">
+  <label htmlFor="profileEmail">Email address</label>
+
+  <div className="profile-email-control">
+    <input
+      id="profileEmail"
+      type="email"
+      maxLength={254}
+      value={profileEmail}
+      readOnly
+      required
+      aria-describedby="profileEmailHint"
+    />
+
+    <span className="profile-email-badge">
+      <span aria-hidden="true">🔒</span>
+      Read-only
+    </span>
+  </div>
+
+  <p className="profile-email-hint" id="profileEmailHint">
+    Your email address is linked to your account and cannot be changed here.
+  </p>
+</div>
               </div>
 
               <button
@@ -1632,6 +1917,94 @@ details, and remove accounts from active management.
               </button>
             </form>
           )}
+        </section>
+        
+        <section className="client-form-panel">
+          <div className="client-panel-heading">
+            <div>
+              <p className="admin-eyebrow">SECURITY</p>
+              <h2>Change password</h2>
+              <p className="admin-page-subtitle">
+                Update your account password.
+              </p>
+            </div>
+          </div>
+
+          {profilePasswordError && (
+            <div className="alert alert-error" role="alert">
+              {profilePasswordError}
+            </div>
+          )}
+
+          {profilePasswordMessage && (
+            <div className="alert alert-success" role="status">
+              {profilePasswordMessage}
+            </div>
+          )}
+
+          <form onSubmit={handleProfilePasswordChange}>
+            <div className="client-form-grid">
+              <div className="form-field">
+                <label htmlFor="profileCurrentPassword">
+                  Current password
+                </label>
+                <input
+                  id="profileCurrentPassword"
+                  type="password"
+                  autoComplete="current-password"
+                  value={profileCurrentPassword}
+                  onChange={(event) =>
+                    setProfileCurrentPassword(event.target.value)
+                  }
+                  required
+                />
+              </div>
+
+              <div className="form-field">
+                <label htmlFor="profileNewPassword">
+                  New password
+                </label>
+                <input
+                  id="profileNewPassword"
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={8}
+                  value={profileNewPassword}
+                  onChange={(event) =>
+                    setProfileNewPassword(event.target.value)
+                  }
+                  required
+                />
+              </div>
+
+              <div className="form-field">
+                <label htmlFor="profileConfirmPassword">
+                  Confirm new password
+                </label>
+                <input
+                  id="profileConfirmPassword"
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={8}
+                  value={profileConfirmPassword}
+                  onChange={(event) =>
+                    setProfileConfirmPassword(event.target.value)
+                  }
+                  required
+                />
+              </div>
+            </div>
+
+            <button
+              className="admin-primary-action client-submit-button"
+              type="submit"
+              disabled={profilePasswordSaving}
+            >
+              {profilePasswordSaving
+                ? 'Changing password...'
+                : 'Change password'}
+            </button>
+          </form>
         </section>
 
         <footer className="admin-footer">
@@ -2322,50 +2695,102 @@ details, and remove accounts from active management.
       </section>
     )
   }
+   
+   function handleTradeSubmit(event) {
+  event.preventDefault()
+  setWalletError('')
+  setWalletMessage('')
 
-  async function handleTradeSubmit(event) {
-    event.preventDefault()
-    setWalletError('')
-    setWalletMessage('')
-
-    if (!tradeCryptoId) {
-      setWalletError('Please select a cryptocurrency.')
-      return
-    }
-
-    if (
-      !tradeQuantity.trim() ||
-      !Number.isFinite(Number(tradeQuantity)) ||
-      Number(tradeQuantity) <= 0
-    ) {
-      setWalletError('Enter a valid quantity greater than zero.')
-      return
-    }
-
-    setTradeSaving(true)
-
-    try {
-      const data = await apiRequest('/wallet/trade', {
-        method: 'POST',
-        body: JSON.stringify({
-          cryptoId: tradeCryptoId,
-          type: tradeType,
-          quantity: tradeQuantity.trim(),
-        }),
-      })
-
-      setWalletMessage(
-        data.message || 'Your transaction was completed successfully.',
-      )
-      setTradeQuantity('')
-
-      await loadWalletData()
-    } catch (err) {
-      setWalletError(err.message || 'Unable to complete the transaction.')
-    } finally {
-      setTradeSaving(false)
-    }
+  if (!tradeCryptoId) {
+    setWalletError('Please select a cryptocurrency.')
+    return
   }
+
+  if (
+    !tradeQuantity.trim() ||
+    !Number.isFinite(Number(tradeQuantity)) ||
+    Number(tradeQuantity) <= 0
+  ) {
+    setWalletError('Enter a valid quantity greater than zero.')
+    return
+  }
+
+  const selectedCrypto = cryptos.find(
+    (crypto) => crypto.id === tradeCryptoId,
+  )
+
+  if (!selectedCrypto || selectedCrypto.latestPrice == null) {
+    setWalletError('No price quote is available for this cryptocurrency.')
+    return
+  }
+
+  const price = Number(selectedCrypto.latestPrice)
+  const quantity = Number(tradeQuantity)
+  const total = Number((price * quantity).toFixed(2))
+  const currentBalance = Number(walletData?.euroBalance || 0)
+
+  if (!Number.isFinite(price) || price <= 0 || total < 0.01) {
+    setWalletError('The transaction total must be at least €0.01.')
+    return
+  }
+
+  const existingHolding = walletData?.holdings?.find(
+    (holding) => holding.crypto.id === tradeCryptoId,
+  )
+
+  const currentQuantity = Number(existingHolding?.quantity || 0)
+
+  setTradeConfirmation({
+    crypto: selectedCrypto,
+    cryptoId: tradeCryptoId,
+    type: tradeType,
+    quantity,
+    quantityText: tradeQuantity.trim(),
+    price,
+    total,
+    balanceBefore: currentBalance,
+    balanceAfter:
+      tradeType === 'BUY'
+        ? Number((currentBalance - total).toFixed(2))
+        : Number((currentBalance + total).toFixed(2)),
+    holdingBefore: currentQuantity,
+    holdingAfter:
+      tradeType === 'BUY'
+        ? currentQuantity + quantity
+        : currentQuantity - quantity,
+  })
+}
+
+async function confirmTrade() {
+  if (!tradeConfirmation || tradeSaving) return
+
+  setTradeSaving(true)
+  setWalletError('')
+
+  try {
+    const data = await apiRequest('/wallet/trade', {
+      method: 'POST',
+      body: JSON.stringify({
+      cryptoId: tradeConfirmation.cryptoId,
+      type: tradeConfirmation.type,
+      quantity: tradeConfirmation.quantityText,
+      }),
+    })
+
+    setWalletMessage(
+      data.message || 'Your transaction was completed successfully.',
+    )
+
+    setTradeQuantity('')
+    setTradeConfirmation(null)
+
+    await loadWalletData()
+  } catch (err) {
+    setWalletError(err.message || 'Unable to complete the transaction.')
+  } finally {
+    setTradeSaving(false)
+  }
+}
 
    function renderClientMarket() {
     const formatPrice = (value) =>
@@ -3038,6 +3463,19 @@ details, and remove accounts from active management.
     )
   }
 
+  async function handleConfirmDialog() {
+  if (!confirmationDialog || confirmationLoading) return
+
+  setConfirmationLoading(true)
+
+  try {
+    await confirmationDialog.onConfirm()
+    setConfirmationDialog(null)
+  } finally {
+    setConfirmationLoading(false)
+  }
+}
+
   if (!token || !user) {
     return renderLogin()
   }
@@ -3046,7 +3484,187 @@ details, and remove accounts from active management.
     return renderPasswordChange()
   }
 
-  return isAdmin ? renderAdminDashboard() : renderClientDashboard()
+  return (
+  <>
+    {isAdmin ? renderAdminDashboard() : renderClientDashboard()}
+
+    {confirmationDialog && (
+      <div className="confirmation-overlay">
+        <div
+          className="confirmation-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirmation-title"
+        >
+          <div className="confirmation-dialog-icon">
+            !
+          </div>
+
+          <h2 id="confirmation-title">
+            {confirmationDialog.title}
+          </h2>
+
+          <p>{confirmationDialog.message}</p>
+
+          <div className="confirmation-dialog-actions">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setConfirmationDialog(null)}
+              disabled={confirmationLoading}
+            >
+              Cancel
+            </button>
+
+            <button
+              type="button"
+              className="confirmation-delete-button"
+              onClick={handleConfirmDialog}
+              disabled={confirmationLoading}
+            >
+              {confirmationLoading
+                ? 'Processing...'
+                : confirmationDialog.confirmLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+        {tradeConfirmation && (
+      <div className="trade-confirmation-overlay">
+        <div
+          className="trade-confirmation-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="trade-confirmation-title"
+        >
+          <h2 id="trade-confirmation-title">
+            {tradeConfirmation.type === 'BUY'
+              ? 'Review your purchase'
+              : 'Review your sale'}
+          </h2>
+
+          <p className="trade-confirmation-intro">
+            Please check the transaction details before confirming.
+          </p>
+
+          <div className="trade-confirmation-details">
+            <div>
+              <span>Cryptocurrency</span>
+              <strong>
+                {tradeConfirmation.crypto.name} ({tradeConfirmation.crypto.symbol})
+              </strong>
+            </div>
+
+            <div>
+              <span>Quantity</span>
+              <strong>
+                {tradeConfirmation.quantity.toLocaleString('en-GB', {
+                  maximumFractionDigits: 8,
+                })}
+              </strong>
+            </div>
+
+            <div>
+              <span>Unit price</span>
+              <strong>
+                {new Intl.NumberFormat('en-GB', {
+                  style: 'currency',
+                  currency: 'EUR',
+                }).format(tradeConfirmation.price)}
+              </strong>
+            </div>
+
+            <div>
+              <span>
+                {tradeConfirmation.type === 'BUY'
+                  ? 'Estimated purchase total'
+                  : 'Estimated sale proceeds'}
+              </span>
+              <strong>
+                {new Intl.NumberFormat('en-GB', {
+                  style: 'currency',
+                  currency: 'EUR',
+                }).format(tradeConfirmation.total)}
+              </strong>
+            </div>
+
+            <div>
+              <span>Euro balance before</span>
+              <strong>
+                {new Intl.NumberFormat('en-GB', {
+                  style: 'currency',
+                  currency: 'EUR',
+                }).format(tradeConfirmation.balanceBefore)}
+              </strong>
+            </div>
+
+            <div>
+              <span>Euro balance after</span>
+              <strong>
+                {new Intl.NumberFormat('en-GB', {
+                  style: 'currency',
+                  currency: 'EUR',
+                }).format(tradeConfirmation.balanceAfter)}
+              </strong>
+            </div>
+
+            {tradeConfirmation.type === 'SELL' && (
+              <>
+                <div>
+                  <span>Current quantity owned</span>
+                  <strong>
+                    {tradeConfirmation.holdingBefore.toLocaleString('en-GB', {
+                      maximumFractionDigits: 8,
+                    })}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>Remaining quantity after sale</span>
+                  <strong>
+                    {tradeConfirmation.holdingAfter.toLocaleString('en-GB', {
+                      maximumFractionDigits: 8,
+                    })}
+                  </strong>
+                </div>
+              </>
+            )}
+          </div>
+
+          <p className="trade-confirmation-note">
+            This is an estimate based on the latest available price.
+            The final transaction is validated by the server when you confirm.
+          </p>
+
+          <div className="trade-confirmation-actions">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setTradeConfirmation(null)}
+              disabled={tradeSaving}
+            >
+              Cancel
+            </button>
+
+            <button
+              type="button"
+              className="trade-confirmation-submit"
+              onClick={confirmTrade}
+              disabled={tradeSaving}
+            >
+              {tradeSaving
+                ? 'Processing...'
+                : tradeConfirmation.type === 'BUY'
+                  ? 'Confirm purchase'
+                  : 'Confirm sale'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </>
+)
 }
 
 export default App

@@ -24,6 +24,13 @@ const quoteSchema = new mongoose.Schema(
         quoteDate: {
             type: Date,
             required: true
+        },
+
+        // UTC calendar day used by the automatic daily price updater.
+        // Existing historical and manually entered quotes may omit it.
+        quoteDay: {
+            type: Date,
+            default: undefined
         }
     },
     {
@@ -31,6 +38,20 @@ const quoteSchema = new mongoose.Schema(
     }
 );
 
+// Supports retrieving a cryptocurrency's historical quotations.
 quoteSchema.index({ crypto: 1, quoteDate: -1 });
+
+// Prevents duplicate automatically generated quotations
+// for the same cryptocurrency and UTC calendar day.
+// Existing quotes without quoteDay are not affected.
+quoteSchema.index(
+    { crypto: 1, quoteDay: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            quoteDay: { $type: "date" }
+        }
+    }
+);
 
 module.exports = mongoose.model("Quote", quoteSchema);
